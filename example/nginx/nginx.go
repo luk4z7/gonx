@@ -10,12 +10,14 @@ import (
 	"os"
 	"strings"
 
-	gonx "github.com/satyrius/gonx"
+	"github.com/luk4z7/gonx"
 )
 
-var conf string
-var format string
-var logFile string
+var (
+	conf    string
+	format  string
+	logFile string
+)
 
 func init() {
 	flag.StringVar(&conf, "conf", "dummy", "Nginx config file (e.g. /etc/nginx/nginx.conf)")
@@ -29,6 +31,7 @@ func main() {
 	// Read given file or from STDIN
 	var logReader io.Reader
 	var err error
+
 	if logFile == "dummy" {
 		logReader = strings.NewReader(`89.234.89.123 [08/Nov/2013:13:39:18 +0000] "GET /api/foo/bar HTTP/1.1"`)
 	} else if logFile == "-" {

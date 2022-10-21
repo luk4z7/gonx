@@ -41,7 +41,7 @@ func NewNginxReader(logFile io.Reader, nginxConf io.Reader, formatName string) (
 // Read next parsed Entry from the log file. Return EOF if there are no Entries to read.
 func (r *Reader) Read() (entry *Entry, err error) {
 	if r.entries == nil {
-		r.entries = MapReduce(r.file, r.parser, new(ReadAll))
+		r.entries = NewMapReduce(r.file, r.parser, new(ReadAll), 1000).Wait()
 	}
 	entry, ok := <-r.entries
 	if !ok {
