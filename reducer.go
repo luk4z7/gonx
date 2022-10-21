@@ -13,8 +13,7 @@ type Reducer interface {
 
 // ReadAll implements the Reducer interface for simple input entries redirected to
 // the output channel.
-type ReadAll struct {
-}
+type ReadAll struct{}
 
 // Reduce redirects input Entries channel directly to the output without any
 // modifications. It is useful when you want jast to read file fast

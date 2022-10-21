@@ -10,11 +10,13 @@ import (
 	"os"
 	"strings"
 
-	gonx "github.com/satyrius/gonx"
+	"github.com/luk4z7/gonx"
 )
 
-var format string
-var logFile string
+var (
+	format  string
+	logFile string
+)
 
 func init() {
 	flag.StringVar(&format, "format", `$remote_addr [$time_local] "$request" $status $request_length $body_bytes_sent $request_time "$t_size" $read_time $gen_time`, "Log format")
@@ -47,8 +49,8 @@ func main() {
 		&gonx.Avg{[]string{"request_time", "read_time", "gen_time"}},
 		&gonx.Sum{[]string{"body_bytes_sent"}},
 		&gonx.Count{})
-	output := gonx.MapReduce(logReader, parser, reducer)
-	for res := range output {
+	output := gonx.NewMapReduce(logReader, parser, reducer, 1000)
+	for res := range output.Wait() {
 		// Process the record... e.g.
 		fmt.Printf("Parsed entry: %+v\n", res)
 	}

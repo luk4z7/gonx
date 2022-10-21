@@ -9,7 +9,7 @@ import (
 	"strings"
 	"sync"
 
-	"gitlab.globoi.com/webmedia/videos-edge/billing/gonx"
+	"github.com/luk4z7/gonx"
 )
 
 var format string

@@ -10,11 +10,13 @@ import (
 	"os"
 	"strings"
 
-	gonx "github.com/satyrius/gonx"
+	"github.com/luk4z7/gonx"
 )
 
-var format string
-var logFile string
+var (
+	format  string
+	logFile string
+)
 
 func init() {
 	flag.StringVar(&format, "format", "$remote_addr [$time_local] \"$request\"", "Log format")
