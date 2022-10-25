@@ -15,13 +15,36 @@ type StringParser interface {
 
 // Parser is a log record parser. Use specific constructors to initialize it.
 type Parser struct {
-	format string
+	format    string
+	regexp    *regexp.Regexp
+	subParser []*SubParser
+}
+
+type SubParser struct {
+	field  string
 	regexp *regexp.Regexp
+}
+
+func (p *Parser) AddSubParser(values map[string]string) {
+	var subParser []*SubParser
+
+	for k, v := range values {
+		re := regexp.MustCompile(v)
+		sub := &SubParser{
+			field:  k,
+			regexp: re,
+		}
+
+		subParser = append(subParser, sub)
+	}
+
+	p.subParser = subParser
 }
 
 // NewParser returns a new Parser, use given log format to create its internal
 // strings parsing regexp.
 func NewParser(format string) *Parser {
+
 	// First split up multiple concatenated fields with placeholder
 	placeholder := " _PLACEHOLDER___ "
 	preparedFormat := format
@@ -32,14 +55,14 @@ func NewParser(format string) *Parser {
 		)
 	}
 
-	// Second replace each fileds to regexp grouping
+	// Second replace each fields to regexp grouping
 	quotedFormat := regexp.QuoteMeta(preparedFormat + " ")
 	re := regexp.MustCompile(`\\\$([A-Za-z0-9_]+)(?:\\\$[A-Za-z0-9_])*(\\?([^$\\A-Za-z0-9_]))`).ReplaceAllString(
 		quotedFormat, "(?P<$1>[^$3]*)$2")
 
 	// Finally remove placeholder
 	re = regexp.MustCompile(fmt.Sprintf(".%s", placeholder)).ReplaceAllString(re, "")
-	return &Parser{format, regexp.MustCompile(fmt.Sprintf("^%v", strings.Trim(re, " ")))}
+	return &Parser{format, regexp.MustCompile(fmt.Sprintf("^%v", strings.Trim(re, " "))), []*SubParser{}}
 }
 
 // ParseString parses a log file line using internal format regexp. If a line
@@ -52,12 +75,22 @@ func (parser *Parser) ParseString(line string) (entry *Entry, err error) {
 		return
 	}
 
-	// Iterate over subexp foung and fill the map record
+	// Iterate over subexp found and fill the map record
 	entry = NewEmptyEntry()
 	for i, name := range re.SubexpNames() {
 		if i == 0 {
 			continue
 		}
+
+		// custom parser for a key that's returned from a line
+		for _, v := range parser.subParser {
+			if v.field == name {
+				if match := v.regexp.FindString(fields[i]); match != "" {
+					fields[i] = match
+				}
+			}
+		}
+
 		entry.SetField(name, fields[i])
 	}
 	return
