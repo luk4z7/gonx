@@ -33,7 +33,7 @@ type SubParser struct {
 	match  MatchKind
 }
 
-func (p *Parser) AddSubParser(values map[string]string, matching ...any) {
+func (p *Parser) AddSubParser(values map[string]string, matching ...interface{}) {
 	var subParser []*SubParser
 
 	match := make(map[string]MatchKind)
