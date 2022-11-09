@@ -20,19 +20,36 @@ type Parser struct {
 	subParser []*SubParser
 }
 
+type MatchKind int
+
+const (
+	Match MatchKind = iota
+	SubMatch
+)
+
 type SubParser struct {
 	field  string
 	regexp *regexp.Regexp
+	match  MatchKind
 }
 
-func (p *Parser) AddSubParser(values map[string]string) {
+func (p *Parser) AddSubParser(values map[string]string, matching ...interface{}) {
 	var subParser []*SubParser
+
+	match := make(map[string]MatchKind)
+	for _, v := range matching {
+		if kind, ok := v.(map[string]MatchKind); ok {
+			match = kind
+		}
+	}
 
 	for k, v := range values {
 		re := regexp.MustCompile(v)
+
 		sub := &SubParser{
 			field:  k,
 			regexp: re,
+			match:  match[k],
 		}
 
 		subParser = append(subParser, sub)
@@ -84,9 +101,19 @@ func (parser *Parser) ParseString(line string) (entry *Entry, err error) {
 
 		// custom parser for a key that's returned from a line
 		for _, v := range parser.subParser {
+
 			if v.field == name {
-				if match := v.regexp.FindString(fields[i]); match != "" {
-					fields[i] = match
+				if v.match == Match {
+					if match := v.regexp.FindString(fields[i]); match != "" {
+						fields[i] = match
+					}
+				}
+
+				if v.match == SubMatch {
+					groups := v.regexp.FindStringSubmatch(fields[i])
+					if len(groups) >= 2 {
+						fields[i] = groups[1]
+					}
 				}
 			}
 		}
