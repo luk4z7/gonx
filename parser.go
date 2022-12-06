@@ -28,12 +28,13 @@ const (
 )
 
 type SubParser struct {
-	field  string
-	regexp *regexp.Regexp
-	match  MatchKind
+	field       string
+	regexp      *regexp.Regexp
+	regexpInner map[string]*regexp.Regexp
+	match       MatchKind
 }
 
-func (p *Parser) AddSubParser(values map[string]string, matching ...interface{}) {
+func (p *Parser) AddSubParser(values map[string]string, inner map[string]map[string]string, matching ...interface{}) {
 	var subParser []*SubParser
 
 	match := make(map[string]MatchKind)
@@ -45,11 +46,17 @@ func (p *Parser) AddSubParser(values map[string]string, matching ...interface{})
 
 	for k, v := range values {
 		re := regexp.MustCompile(v)
+		res := make(map[string]*regexp.Regexp)
+
+		for k, v := range inner[k] {
+			res[k] = regexp.MustCompile(v)
+		}
 
 		sub := &SubParser{
-			field:  k,
-			regexp: re,
-			match:  match[k],
+			field:       k,
+			regexp:      re,
+			regexpInner: res,
+			match:       match[k],
 		}
 
 		subParser = append(subParser, sub)
@@ -111,8 +118,18 @@ func (parser *Parser) ParseString(line string) (entry *Entry, err error) {
 
 				if v.match == SubMatch {
 					groups := v.regexp.FindStringSubmatch(fields[i])
+
 					if len(groups) >= 2 {
-						fields[i] = groups[1]
+						result := groups[1]
+
+						if _, ok := v.regexpInner[result]; ok {
+							innerMatch := v.regexpInner[result].FindStringSubmatch(fields[i])
+							if len(innerMatch) >= 2 {
+								fields[i] = innerMatch[1]
+							}
+						} else {
+							fields[i] = result
+						}
 					}
 				}
 			}
@@ -120,6 +137,7 @@ func (parser *Parser) ParseString(line string) (entry *Entry, err error) {
 
 		entry.SetField(name, fields[i])
 	}
+
 	return
 }
 
