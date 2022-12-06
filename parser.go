@@ -128,7 +128,7 @@ func (parser *Parser) ParseString(line string) (entry *Entry, err error) {
 								fields[i] = innerMatch[1]
 							}
 						} else {
-							fields[i] = groups[1]
+							fields[i] = result
 						}
 					}
 				}
