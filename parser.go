@@ -125,7 +125,7 @@ func (parser *Parser) ParseString(line string) (entry *Entry, err error) {
 						if _, ok := v.regexpInner[result]; ok {
 							innerMatch := v.regexpInner[result].FindStringSubmatch(fields[i])
 							if len(innerMatch) >= 2 {
-								fields[1] = innerMatch[1]
+								fields[i] = innerMatch[1]
 							}
 						} else {
 							fields[i] = groups[1]
