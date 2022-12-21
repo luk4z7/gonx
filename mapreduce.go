@@ -44,6 +44,9 @@ func (m *MapReduce) Wait() chan *Entry {
 				entry, err := m.parser.ParseString(l)
 				if err != nil {
 					fmt.Println("Error on given format", "err", err)
+					<-m.limit
+
+					return
 				}
 
 				m.entries <- entry
