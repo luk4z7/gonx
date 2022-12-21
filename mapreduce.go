@@ -3,6 +3,7 @@ package gonx
 import (
 	"bufio"
 	"bytes"
+	"fmt"
 	"io"
 	"sync"
 )
@@ -42,7 +43,7 @@ func (m *MapReduce) Wait() chan *Entry {
 
 				entry, err := m.parser.ParseString(l)
 				if err != nil {
-					panic(err)
+					fmt.Println("Error on given format", "err", err)
 				}
 
 				m.entries <- entry
