@@ -65,7 +65,7 @@ func (m *MapReduce) Wait() chan *Entry {
 	go func() {
 		err := m.readWithReadLine(m.file, m.lines)
 		if err != nil {
-			panic(err)
+			fmt.Println("Error on read line", "err", err)
 		}
 	}()
 
