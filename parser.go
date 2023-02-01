@@ -8,30 +8,79 @@ import (
 	"strings"
 )
 
-// StringParser is the interface that wraps the ParseString method.
-type StringParser interface {
-	ParseString(line string) (entry *Entry, err error)
-}
-
-// Parser is a log record parser. Use specific constructors to initialize it.
-type Parser struct {
-	format    string
-	regexp    *regexp.Regexp
-	subParser []*SubParser
-}
-
-type MatchKind int
-
 const (
 	Match MatchKind = iota
 	SubMatch
 )
 
-type SubParser struct {
-	field       string
-	regexp      *regexp.Regexp
-	regexpInner map[string]*regexp.Regexp
-	match       MatchKind
+type (
+	// StringParser is the interface that wraps the ParseString method.
+	StringParser interface {
+		ParseString(line string) (entry *Entry, err error)
+	}
+
+	// Parser is a log record parser. Use specific constructors to initialize it.
+	Parser struct {
+		format      string
+		regexp      *regexp.Regexp
+		regexpRetry *regexp.Regexp
+		subParser   []*SubParser
+	}
+
+	Option func(p *Parser)
+
+	MatchKind int
+
+	SubParser struct {
+		field       string
+		regexp      *regexp.Regexp
+		regexpInner map[string]*regexp.Regexp
+		match       MatchKind
+	}
+)
+
+func WithRetry(format string) Option {
+	return func(p *Parser) {
+		p.regexpRetry = prepareFormat(format)
+	}
+}
+
+// NewParser returns a new Parser, use given log format to create its internal
+// strings parsing regexp.
+func NewParser(format string, opts ...Option) *Parser {
+	parser := &Parser{
+		format:    format,
+		regexp:    prepareFormat(format),
+		subParser: []*SubParser{},
+	}
+
+	for _, opt := range opts {
+		opt(parser)
+	}
+
+	return parser
+}
+
+func prepareFormat(format string) *regexp.Regexp {
+	// First split up multiple concatenated fields with placeholder
+	placeholder := " _PLACEHOLDER___ "
+	preparedFormat := format
+	concatenatedRe := regexp.MustCompile(`[A-Za-z0-9_]\$[A-Za-z0-9_]`)
+	for concatenatedRe.MatchString(preparedFormat) {
+		preparedFormat = regexp.MustCompile(`([A-Za-z0-9_])\$([A-Za-z0-9_]+)(\\?([^$\\A-Za-z0-9_]))`).ReplaceAllString(
+			preparedFormat, fmt.Sprintf("${1}${3}%s$$${2}${3}", placeholder),
+		)
+	}
+
+	// Second replace each fields to regexp grouping
+	quotedFormat := regexp.QuoteMeta(preparedFormat + " ")
+	re := regexp.MustCompile(`\\\$([A-Za-z0-9_]+)(?:\\\$[A-Za-z0-9_])*(\\?([^$\\A-Za-z0-9_]))`).ReplaceAllString(
+		quotedFormat, "(?P<$1>[^$3]*)$2")
+
+	// Finally remove placeholder
+	re = regexp.MustCompile(fmt.Sprintf(".%s", placeholder)).ReplaceAllString(re, "")
+
+	return regexp.MustCompile(fmt.Sprintf("^%v", strings.Trim(re, " ")))
 }
 
 func (p *Parser) AddSubParser(values map[string]string, inner map[string]map[string]string, matching ...interface{}) {
@@ -65,38 +114,21 @@ func (p *Parser) AddSubParser(values map[string]string, inner map[string]map[str
 	p.subParser = subParser
 }
 
-// NewParser returns a new Parser, use given log format to create its internal
-// strings parsing regexp.
-func NewParser(format string) *Parser {
-
-	// First split up multiple concatenated fields with placeholder
-	placeholder := " _PLACEHOLDER___ "
-	preparedFormat := format
-	concatenatedRe := regexp.MustCompile(`[A-Za-z0-9_]\$[A-Za-z0-9_]`)
-	for concatenatedRe.MatchString(preparedFormat) {
-		preparedFormat = regexp.MustCompile(`([A-Za-z0-9_])\$([A-Za-z0-9_]+)(\\?([^$\\A-Za-z0-9_]))`).ReplaceAllString(
-			preparedFormat, fmt.Sprintf("${1}${3}%s$$${2}${3}", placeholder),
-		)
-	}
-
-	// Second replace each fields to regexp grouping
-	quotedFormat := regexp.QuoteMeta(preparedFormat + " ")
-	re := regexp.MustCompile(`\\\$([A-Za-z0-9_]+)(?:\\\$[A-Za-z0-9_])*(\\?([^$\\A-Za-z0-9_]))`).ReplaceAllString(
-		quotedFormat, "(?P<$1>[^$3]*)$2")
-
-	// Finally remove placeholder
-	re = regexp.MustCompile(fmt.Sprintf(".%s", placeholder)).ReplaceAllString(re, "")
-	return &Parser{format, regexp.MustCompile(fmt.Sprintf("^%v", strings.Trim(re, " "))), []*SubParser{}}
-}
-
 // ParseString parses a log file line using internal format regexp. If a line
 // does not match the given format an error will be returned.
 func (parser *Parser) ParseString(line string) (entry *Entry, err error) {
 	re := parser.regexp
 	fields := re.FindStringSubmatch(line)
 	if fields == nil {
-		err = fmt.Errorf("access log line '%v' does not match given format '%v'", line, re)
-		return
+		if parser.regexpRetry != nil {
+			re = parser.regexpRetry
+			fields = re.FindStringSubmatch(line)
+		}
+
+		if fields == nil {
+			err = fmt.Errorf("access log line '%v' does not match given format '%v'", line, re)
+			return
+		}
 	}
 
 	// Iterate over subexp found and fill the map record
