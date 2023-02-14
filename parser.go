@@ -123,6 +123,7 @@ func (parser *Parser) ParseString(line string) (entry *Entry, err error) {
 		if parser.regexpRetry != nil {
 			re = parser.regexpRetry
 			fields = re.FindStringSubmatch(line)
+			fmt.Println("retry parser format")
 		}
 
 		if fields == nil {
