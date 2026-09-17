@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"io"
-	"regexp"
 	"strings"
 )
 
@@ -22,8 +21,10 @@ type (
 	// Parser is a log record parser. Use specific constructors to initialize it.
 	Parser struct {
 		format      string
-		regexp      *regexp.Regexp
-		regexpRetry *regexp.Regexp
+		retryFormat string
+		engine      RegexEngine
+		regexp      Regexp
+		regexpRetry Regexp
 		subParser   []*SubParser
 	}
 
@@ -33,24 +34,34 @@ type (
 
 	SubParser struct {
 		field       string
-		regexp      *regexp.Regexp
-		regexpInner map[string]*regexp.Regexp
+		regexp      Regexp
+		regexpInner map[string]Regexp
 		match       MatchKind
 	}
 )
 
 func WithRetry(format string) Option {
 	return func(p *Parser) {
-		p.regexpRetry = prepareFormat(format)
+		p.retryFormat = format
 	}
 }
 
-// NewParser returns a new Parser, use given log format to create its internal
-// strings parsing regexp.
-func NewParser(format string, opts ...Option) *Parser {
+// WithRegexEngine sets the regular expression implementation used to compile
+// every pattern the parser needs. Without it parsers use StdRegex, the
+// standard library engine.
+func WithRegexEngine(engine RegexEngine) Option {
+	return func(p *Parser) {
+		if engine != nil {
+			p.engine = engine
+		}
+	}
+}
+
+// newParser applies opts over the defaults without compiling anything, so the
+// engine is known before the first pattern is compiled.
+func newParser(opts ...Option) *Parser {
 	parser := &Parser{
-		format:    format,
-		regexp:    prepareFormat(format),
+		engine:    StdRegex,
 		subParser: []*SubParser{},
 	}
 
@@ -61,26 +72,42 @@ func NewParser(format string, opts ...Option) *Parser {
 	return parser
 }
 
-func prepareFormat(format string) *regexp.Regexp {
-	// First split up multiple concatenated fields with placeholder
+// NewParser returns a new Parser, use given log format to create its internal
+// strings parsing regexp.
+func NewParser(format string, opts ...Option) *Parser {
+	parser := newParser(opts...)
+	parser.format = format
+	parser.regexp = prepareFormat(parser.engine, format)
+
+	if parser.retryFormat != "" {
+		parser.regexpRetry = prepareFormat(parser.engine, parser.retryFormat)
+	}
+
+	return parser
+}
+
+func prepareFormat(engine RegexEngine, format string) Regexp {
+	// First split up multiple concatenated fields with placeholder.
+	// Group references stay in the bare `$1` form: coregex leaves the `${1}`
+	// brace form unexpanded, while both engines agree on the bare one.
 	placeholder := " _PLACEHOLDER___ "
 	preparedFormat := format
-	concatenatedRe := regexp.MustCompile(`[A-Za-z0-9_]\$[A-Za-z0-9_]`)
+	concatenatedRe := engine.MustCompile(`[A-Za-z0-9_]\$[A-Za-z0-9_]`)
 	for concatenatedRe.MatchString(preparedFormat) {
-		preparedFormat = regexp.MustCompile(`([A-Za-z0-9_])\$([A-Za-z0-9_]+)(\\?([^$\\A-Za-z0-9_]))`).ReplaceAllString(
-			preparedFormat, fmt.Sprintf("${1}${3}%s$$${2}${3}", placeholder),
+		preparedFormat = engine.MustCompile(`([A-Za-z0-9_])\$([A-Za-z0-9_]+)(\\?([^$\\A-Za-z0-9_]))`).ReplaceAllString(
+			preparedFormat, fmt.Sprintf("$1$3%s$$$2$3", placeholder),
 		)
 	}
 
 	// Second replace each fields to regexp grouping
-	quotedFormat := regexp.QuoteMeta(preparedFormat + " ")
-	re := regexp.MustCompile(`\\\$([A-Za-z0-9_]+)(?:\\\$[A-Za-z0-9_])*(\\?([^$\\A-Za-z0-9_]))`).ReplaceAllString(
+	quotedFormat := engine.QuoteMeta(preparedFormat + " ")
+	re := engine.MustCompile(`\\\$([A-Za-z0-9_]+)(?:\\\$[A-Za-z0-9_])*(\\?([^$\\A-Za-z0-9_]))`).ReplaceAllString(
 		quotedFormat, "(?P<$1>[^$3]*)$2")
 
 	// Finally remove placeholder
-	re = regexp.MustCompile(fmt.Sprintf(".%s", placeholder)).ReplaceAllString(re, "")
+	re = engine.MustCompile(fmt.Sprintf(".%s", placeholder)).ReplaceAllString(re, "")
 
-	return regexp.MustCompile(fmt.Sprintf("^%v", strings.Trim(re, " ")))
+	return engine.MustCompile(fmt.Sprintf("^%v", strings.Trim(re, " ")))
 }
 
 func (p *Parser) AddSubParser(values map[string]string, inner map[string]map[string]string, matching ...interface{}) {
@@ -94,11 +121,11 @@ func (p *Parser) AddSubParser(values map[string]string, inner map[string]map[str
 	}
 
 	for k, v := range values {
-		re := regexp.MustCompile(v)
-		res := make(map[string]*regexp.Regexp)
+		re := p.engine.MustCompile(v)
+		res := make(map[string]Regexp)
 
 		for k, v := range inner[k] {
-			res[k] = regexp.MustCompile(v)
+			res[k] = p.engine.MustCompile(v)
 		}
 
 		sub := &SubParser{
@@ -123,7 +150,6 @@ func (parser *Parser) ParseString(line string) (entry *Entry, err error) {
 		if parser.regexpRetry != nil {
 			re = parser.regexpRetry
 			fields = re.FindStringSubmatch(line)
-			fmt.Println("retry parser format")
 		}
 
 		if fields == nil {
@@ -177,9 +203,10 @@ func (parser *Parser) ParseString(line string) (entry *Entry, err error) {
 // NewNginxParser parses the nginx conf file to find log_format with the given
 // name and returns a parser for this format. It returns an error if cannot find
 // the given log format.
-func NewNginxParser(conf io.Reader, name string) (parser *Parser, err error) {
+func NewNginxParser(conf io.Reader, name string, opts ...Option) (parser *Parser, err error) {
+	engine := newParser(opts...).engine
 	scanner := bufio.NewScanner(conf)
-	re := regexp.MustCompile(fmt.Sprintf(`^\s*log_format\s+%v\s+(.+)\s*$`, name))
+	re := engine.MustCompile(fmt.Sprintf(`^\s*log_format\s+%v\s+(.+)\s*$`, name))
 	found := false
 	var format string
 	for scanner.Scan() {
@@ -197,7 +224,7 @@ func NewNginxParser(conf io.Reader, name string) (parser *Parser, err error) {
 			line = scanner.Text()
 		}
 		// Look for a definition end
-		re = regexp.MustCompile(`^\s*(.*?)\s*(;|$)`)
+		re = engine.MustCompile(`^\s*(.*?)\s*(;|$)`)
 		lineSplit := re.FindStringSubmatch(line)
 		if l := len(lineSplit[1]); l > 2 {
 			format += lineSplit[1][1 : l-1]
@@ -211,6 +238,6 @@ func NewNginxParser(conf io.Reader, name string) (parser *Parser, err error) {
 	} else {
 		err = scanner.Err()
 	}
-	parser = NewParser(format)
+	parser = NewParser(format, opts...)
 	return
 }
